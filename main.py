@@ -1,5 +1,5 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, HttpUrl
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -7,7 +7,7 @@ import time
 app = FastAPI(title="URL Viewer API")
 
 class UrlReq(BaseModel):
-    url: str
+    url: HttpUrl   # ✅ only valid http/https
 
 @app.post("/view")
 def view_url(req: UrlReq):
@@ -15,23 +15,20 @@ def view_url(req: UrlReq):
 
     try:
         r = requests.get(
-            req.url,
+            str(req.url),
             timeout=8,
             headers={"User-Agent": "Mozilla/5.0"}
         )
 
         elapsed = round((time.time() - start) * 1000, 2)
-
         soup = BeautifulSoup(r.text, "html.parser")
 
         title = soup.title.string.strip() if soup.title else "No title"
-        description = ""
         meta = soup.find("meta", attrs={"name": "description"})
-        if meta and meta.get("content"):
-            description = meta.get("content")
+        description = meta["content"] if meta and meta.get("content") else ""
 
         return {
-            "url": req.url,
+            "url": str(req.url),
             "status_code": r.status_code,
             "response_time_ms": elapsed,
             "title": title,
@@ -40,10 +37,7 @@ def view_url(req: UrlReq):
         }
 
     except Exception as e:
-        return {
-            "url": req.url,
-            "error": str(e)
-        }
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/")
 def root():
