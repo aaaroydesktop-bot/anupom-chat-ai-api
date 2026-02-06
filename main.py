@@ -1,39 +1,50 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import pipeline
-import torch
-import torchvision.models as models
-import torchvision.transforms as T
-from PIL import Image
+import requests
+from bs4 import BeautifulSoup
+import time
 
-app = FastAPI(title="Simple AI API")
+app = FastAPI(title="URL Viewer API")
 
-# ---------- NLP ----------
-nlp = pipeline("sentiment-analysis")
+class UrlReq(BaseModel):
+    url: str
 
-class TextReq(BaseModel):
-    text: str
+@app.post("/view")
+def view_url(req: UrlReq):
+    start = time.time()
 
-@app.post("/nlp")
-def nlp_api(req: TextReq):
-    result = nlp(req.text)
-    return {"text": req.text, "result": result}
+    try:
+        r = requests.get(
+            req.url,
+            timeout=8,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
 
-# ---------- CNN ----------
-cnn = models.resnet18(pretrained=True)
-cnn.eval()
+        elapsed = round((time.time() - start) * 1000, 2)
 
-transform = T.Compose([
-    T.Resize((224,224)),
-    T.ToTensor()
-])
+        soup = BeautifulSoup(r.text, "html.parser")
 
-@app.post("/cnn")
-async def cnn_api(file: UploadFile = File(...)):
-    img = Image.open(file.file).convert("RGB")
-    x = transform(img).unsqueeze(0)
+        title = soup.title.string.strip() if soup.title else "No title"
+        description = ""
+        meta = soup.find("meta", attrs={"name": "description"})
+        if meta and meta.get("content"):
+            description = meta.get("content")
 
-    with torch.no_grad():
-        out = cnn(x)
+        return {
+            "url": req.url,
+            "status_code": r.status_code,
+            "response_time_ms": elapsed,
+            "title": title,
+            "description": description,
+            "server": r.headers.get("Server", "Unknown")
+        }
 
-    return {"prediction_index": out.argmax().item()}
+    except Exception as e:
+        return {
+            "url": req.url,
+            "error": str(e)
+        }
+
+@app.get("/")
+def root():
+    return {"status": "URL Viewer API running"}
